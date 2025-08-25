@@ -1,0 +1,122 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <DHT.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+
+// ---------- LCD Setup ----------
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+// ---------- DHT11 Setup ----------
+#define DHTPIN 7
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+// ---------- Pin Configuration ----------
+int moisture = A1;     // Soil Moisture Sensor
+int mq135 = A0;        // MQ135 Gas Sensor
+int pump = 5;          // Pump Relay
+int fan = 6;           // Fan Relay
+
+// Motors for Robot Mobility
+int m1 = 9;
+int m2 = 10;
+int m3 = 11;
+int m4 = 12;
+
+// ---------- WiFi + Cloud Setup ----------
+const char* ssid = "YOUR_WIFI_SSID";
+const char* password = "YOUR_WIFI_PASSWORD";
+String serverURL = "http://api.thingspeak.com/update?api_key=YOUR_API_KEY";
+
+// ---------- Setup ----------
+void setup() {
+  Serial.begin(115200);
+
+  lcd.init();
+  lcd.backlight();
+
+  pinMode(pump, OUTPUT);
+  pinMode(fan, OUTPUT);
+
+  pinMode(m1, OUTPUT);
+  pinMode(m2, OUTPUT);
+  pinMode(m3, OUTPUT);
+  pinMode(m4, OUTPUT);
+
+  dht.begin();
+
+  // WiFi Setup
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected to WiFi!");
+}
+
+// ---------- Loop ----------
+void loop() {
+  // ---- Sensor Readings ----
+  float h = dht.readHumidity();
+  float t = dht.readTemperature();
+  int co2 = analogRead(mq135);
+  int soil = analogRead(moisture);
+
+  // ---- LCD Display ----
+  lcd.setCursor(0, 0);
+  lcd.print("T:");
+  lcd.print(t);
+  lcd.print(" H:");
+  lcd.print(h);
+
+  lcd.setCursor(0, 1);
+  lcd.print("CO2:");
+  lcd.print(co2);
+  lcd.print(" S:");
+  lcd.print(soil);
+
+  // ---- Control Logic ----
+  if (t > 30) {
+    digitalWrite(fan, HIGH);  // Fan ON
+  } else {
+    digitalWrite(fan, LOW);   // Fan OFF
+  }
+
+  if (soil < 2000) {  // Dry soil
+    digitalWrite(pump, HIGH); // Pump ON
+  } else {
+    digitalWrite(pump, LOW);  // Pump OFF
+  }
+
+  // Example Mobility Control (Forward for 2s, Stop for 2s)
+  digitalWrite(m1, HIGH);
+  digitalWrite(m2, LOW);
+  digitalWrite(m3, HIGH);
+  digitalWrite(m4, LOW);
+  delay(2000);
+
+  digitalWrite(m1, LOW);
+  digitalWrite(m2, LOW);
+  digitalWrite(m3, LOW);
+  digitalWrite(m4, LOW);
+  delay(2000);
+
+  // ---- Send Data to Cloud ----
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    String url = serverURL + "&field1=" + String(t) + "&field2=" + String(h) +
+                 "&field3=" + String(co2) + "&field4=" + String(soil);
+    http.begin(url);
+    int httpCode = http.GET();
+    if (httpCode > 0) {
+      Serial.println("Data sent to Cloud: " + url);
+    } else {
+      Serial.println("Error sending data");
+    }
+    http.end();
+  }
+
+  delay(5000); // Wait 5s before next reading
+}
